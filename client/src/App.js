@@ -1,11 +1,19 @@
 import React, { Component } from "react";
-import SimpleStorageContract from "./contracts/SimpleStorage.json";
+import SolidityDriveContract from "./contracts/SolidityDrive.json";
 import getWeb3 from "./getWeb3";
+import { StyledDropZone } from "react-drop-zone";
+import FileIcon, { defaultStyles } from "react-file-icon";
+import "react-drop-zone/dist/styles.css";
+import "bootstrap/dist/css/bootstrap.css"
+import { Table } from "reactstrap";
+import fileReaderPullStream from "pull-file-reader";
+import ipfs from "./ipfs";
+import Moment from "react-moment";
 
 import "./App.css";
 
 class App extends Component {
-  state = { storageValue: 0, web3: null, accounts: null, contract: null };
+  state = { solidityDrive: [], web3: null, accounts: null, contract: null };
 
   componentDidMount = async () => {
     try {
@@ -17,9 +25,9 @@ class App extends Component {
 
       // Get the contract instance.
       const networkId = await web3.eth.net.getId();
-      const deployedNetwork = SimpleStorageContract.networks[networkId];
+      const deployedNetwork = SolidityDriveContract.networks[networkId];
       const instance = new web3.eth.Contract(
-        SimpleStorageContract.abi,
+        SolidityDriveContract.abi,
         deployedNetwork && deployedNetwork.address,
       );
 
@@ -49,24 +57,73 @@ class App extends Component {
   };
 
   render() {
+    const {solidityDrive} = this.state;
     if (!this.state.web3) {
       return <div>Loading Web3, accounts, and contract...</div>;
     }
     return (
       <div className="App">
-        <h1>Good to Go!</h1>
-        <p>Your Truffle Box is installed and ready.</p>
-        <h2>Smart Contract Example</h2>
-        <p>
-          If your contracts compiled and migrated successfully, below will show
-          a stored value of 5 (by default).
-        </p>
-        <p>
-          Try changing the value stored on <strong>line 40</strong> of App.js.
-        </p>
-        <div>The stored value is: {this.state.storageValue}</div>
+
+        <div className="container pt-3">
+          <StyledDropZone onDrop={this.onDrop} />
+            <Table>
+              <thead>
+                <tr>
+                  <th width="7%" scope="row">Tipo</th>
+                  <th className="text-left">Nome do Arquivo</th>
+                  <th className="text-right">Data</th>
+                </tr>
+              </thead>
+              <tbody>
+                {solidityDrive !== [] ? solidityDrive.map((item, key) => (
+                  <tr>
+                    <th>
+                    <FileIcon size={30} extension={item[2]} {...defaultStyles[item[2]]} />                   
+                    </th>
+                    <th className="text-left"><a target="_blank" href={"https://ipfs.io/ipfs/" +item[0]}>{item[1]}</a></th>
+                    <th className="text-right">
+                      <Moment format="DD/MM/YYYY" unix>{item[3]}</Moment>
+                    </th>
+                  </tr> 
+               )) : null}
+              </tbody>
+            </Table>
+        </div>
       </div>
     );
+  }
+
+  getFiles = async () => {
+    try{
+      console.log(this.state);
+      const {accounts, contract} = this.state;
+
+      let filesLength = await contract.methods.getLength().call({from: accounts[0]});
+      let files = []
+      for (let i = 0; i < filesLength; i++){
+        let file = await contract.methods.getFiles(i).call({from: accounts[0]});
+        files.push(file);
+      }
+      this.setState({solidityDrive:files});
+    }catch (error){
+      console.log(error);
+    }
+  }
+
+  onDrop = async (file) => {
+    try{
+      const {contract, accounts} = this.state;
+      const stream = fileReaderPullStream(file);
+      const result = await ipfs.add(stream);
+      const timestamp = Math.round(+new Date()/1000);
+      const type = file.name.substr(file.name.lastIndexOf(".")+1);
+      let uploaded = await contract.methods.add(result[0].hash, file.name, type, timestamp)
+      .send({ from: accounts[0], gas:300000 });
+      console.log(uploaded);
+      this.getFiles()
+    }catch (error) {
+      console.log(error);
+    }
   }
 }
 
